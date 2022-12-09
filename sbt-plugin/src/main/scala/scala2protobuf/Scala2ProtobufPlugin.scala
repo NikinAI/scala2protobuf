@@ -32,7 +32,7 @@ object Scala2ProtobufPlugin extends AutoPlugin {
     val log: ManagedLogger = streams.value.log
     GeneratorRunner(SCALA2PB.sources.value, SCALA2PB.target.value, log)
 
-  }
+  }.dependsOn(compile in Compile)
 
   def scala2protobufSettings = Seq(
     SCALA2PB.generate := generateTask.value,
@@ -44,10 +44,11 @@ object Scala2ProtobufPlugin extends AutoPlugin {
   override def projectSettings: Seq[Def.Setting[_]] =
     scala2protobufSettings ++
       Seq(
+
         (sources in Compile) :=
           ((sources in Compile).value.toSet[File] --
             SCALA2PB.replacementSources.value.toSet[File]).toSeq,
-        (compile in Compile) := (compile in Compile)
+        (packageBin in Compile) := (packageBin in Compile)
           .dependsOn(SCALA2PB.generate)
           .value
       )

@@ -1,22 +1,12 @@
 package scala2protobuf
 
 import java.io.File
-
 import sbt.io._
-import scala2protobuf.descriptor.scala.{
-  Enum,
-  Field,
-  Message,
-  Method,
-  ScalaDescriptor,
-  ScalaFile,
-  ScalaPackage,
-  ScalaType,
-  Service
-}
+import scala2protobuf.descriptor.scala.{Enum, Field, Message, Method, ScalaDescriptor, ScalaFile, ScalaPackage, ScalaType, Service}
 import scala2protobuf.descriptor.{ConvertHelper, protobuf}
 
 import scala.collection.parallel.{ParIterable, ParSeq}
+import scala.meta
 import scala.meta.inputs.Input
 import scala.meta.parsers.Parse
 import scala.meta._
@@ -75,22 +65,47 @@ class Scala2Protobuf(dialect: Dialect) {
                                  case s: Stat => s
                                },
                                file)
+
       case clazz: Defn.Class if isCaseClass(clazz) =>
         Seq(toMessage(scalaPackage, clazz, file))
       case trt: Defn.Trait if isSealedTrait(trt) =>
         Seq(toEnum(scalaPackage, trt, stats, file))
-      case trt: Defn.Trait => Seq(toService(scalaPackage, trt, file))
+      case trt: Defn.Trait if isProcessTrait(trt) => Seq(toService(scalaPackage, trt, file))
+      case obj: Defn.Object if(isProcessTrait(obj)) => Seq(toService(scalaPackage, obj, file))
+      case obj :Defn.Object =>     val basePackage =
+        if (scalaPackage.name.isEmpty) "" else scalaPackage.name + "."
+        collectScalaDescriptor(ScalaPackage(basePackage + obj.name.value),
+          obj.templ.children.collect {
+            case s: Stat => s
+          },
+          file)
     }.flatten
   }
 
   private[scala2protobuf] def isCaseClass(clazz: Defn.Class): Boolean =
     clazz.mods.exists {
       case _: Mod.Case => true
+      case _ => false
     }
+
+  private[scala2protobuf] def isProcessTrait(defn: Defn): Boolean = {
+    defn match {
+      case obj: Defn.Object => obj.mods.collect{
+        case Mod.Annot(x) if x.tpe.toString() == "OurProcess" => true
+        case _ => false
+      }.nonEmpty
+      case trt: Defn.Trait => trt.mods.collect{
+        case Mod.Annot(x) if x.tpe.toString() == "OurProcess" => true
+        case _ => false
+      }.nonEmpty
+      case _ => false
+    }
+  }
 
   private[scala2protobuf] def isSealedTrait(trt: Defn.Trait): Boolean =
     trt.mods.exists {
       case _: Mod.Sealed => true
+      case _ => false
     }
 
   private[scala2protobuf] def toMessage(scalaPackage: ScalaPackage,
@@ -151,6 +166,29 @@ class Scala2Protobuf(dialect: Dialect) {
     })
   }
 
+  private[scala2protobuf] def toService(scalaPackage: ScalaPackage,
+                                        trt: Defn.Object,
+                                        file: ScalaFile): Service = {
+    val defFunc = trt match {
+      case  Defn.Object(List(
+        Mod.Annot(Init(Type.Name("FunctionService"),_, _)),_
+      ), _, Template(_, List(Init(Type.Apply(_, List(input, _, output)), _, _)) , _, _ )) =>
+        Decl.Def(
+          List.empty,
+          Term.Name("process"),
+          List.empty,
+          List(
+            List(
+              Term.Param(List.empty, Term.Name("input"), Some(input), None),
+            )
+          ),
+          Type.Apply(Type.Name("Future"), List(output))
+        )
+    }
+
+    Service(scalaPackage, file, trt.name.value, List(toMethod(defFunc)))
+  }
+
   private[scala2protobuf] def toMethod(scalaMethod: Decl.Def): Method = {
     val inputParam = scalaMethod.paramss.flatten.headOption.getOrElse(
       throw new RuntimeException(s"Input parameter is missing")
@@ -187,6 +225,48 @@ class Scala2Protobuf(dialect: Dialect) {
                inputType = in,
                isStreamOutput = true,
                outputType = out)
+      case _ =>
+        throw new RuntimeException(
+          s"${inputParam.decltpe.get} => ${scalaMethod.decltpe} can not be used for service type ")
+    }
+  }
+
+  private[scala2protobuf] def toMethod(scalaMethod: meta.Defn.Def): Method = {
+    val inputParam = scalaMethod.paramss.flatten.headOption.getOrElse(
+      throw new RuntimeException(s"Input parameter is missing")
+    )
+    if (scalaMethod.paramss.flatten.size > 1) {
+      throw new RuntimeException(s"Must be only one parameter")
+    }
+    val methodName = scalaMethod.name.syntax.capitalize
+
+    (Types.of(inputParam.decltpe.get), Types.of(scalaMethod.decltpe.get)) match {
+      case (Types.Single(in), Types.Future(Types.Single(out))) =>
+        Method(name = methodName,
+          isStreamInput = false,
+          inputType = in,
+          isStreamOutput = false,
+          outputType = out)
+      case (Types.StreamObserver(Types.Single(in)),
+      Types.Future(Types.Single(out))) =>
+        Method(name = methodName,
+          isStreamInput = true,
+          inputType = in,
+          isStreamOutput = false,
+          outputType = out)
+      case (Types.Single(in), Types.StreamObserver(Types.Single(out))) =>
+        Method(name = methodName,
+          isStreamInput = false,
+          inputType = in,
+          isStreamOutput = true,
+          outputType = out)
+      case (Types.StreamObserver(Types.Single(in)),
+      Types.StreamObserver(Types.Single(out))) =>
+        Method(name = methodName,
+          isStreamInput = true,
+          inputType = in,
+          isStreamOutput = true,
+          outputType = out)
       case _ =>
         throw new RuntimeException(
           s"${inputParam.decltpe.get} => ${scalaMethod.decltpe} can not be used for service type ")
