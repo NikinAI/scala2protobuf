@@ -2,6 +2,7 @@ package scala2protobuf
 
 import java.io.File
 import sbt.io._
+import scala2protobuf.annotations.Annotations
 import scala2protobuf.descriptor.scala.{Enum, Field, Message, Method, ScalaDescriptor, ScalaFile, ScalaPackage, ScalaType, Service}
 import scala2protobuf.descriptor.{ConvertHelper, protobuf}
 
@@ -66,7 +67,9 @@ class Scala2Protobuf(dialect: Dialect) {
                                },
                                file)
 
-      case clazz: Defn.Class if isCaseClass(clazz) =>
+      case clazz: Defn.Class if isCaseClass(clazz) && clazz.mods.collect{
+        case a @ Mod.Annot(Init(Type.Name(Annotations.functionDataName),_, _)) => a
+      }.nonEmpty =>
         Seq(toMessage(scalaPackage, clazz, file))
       case trt: Defn.Trait if isSealedTrait(trt) =>
         Seq(toEnum(scalaPackage, trt, stats, file))
@@ -171,7 +174,7 @@ class Scala2Protobuf(dialect: Dialect) {
                                         file: ScalaFile): Service = {
     val defFunc = trt match {
       case  Defn.Object(List(
-        Mod.Annot(Init(Type.Name("FunctionService"),_, _)),_
+        Mod.Annot(Init(Type.Name(Annotations.serviceProcessorName),_, _)),_
       ), _, Template(_, List(Init(Type.Apply(_, List(input, _, output)), _, _)) , _, _ )) =>
         Decl.Def(
           List.empty,

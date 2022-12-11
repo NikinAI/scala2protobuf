@@ -9,7 +9,7 @@ val unusedWarnings =
 
 val commonSettings = Seq(
   fork in Test := true,
-  scalaVersion := "2.12.6",
+  scalaVersion := "2.12.17",
   organization := "com.github.bakenezumi",
   version := "0.1.0-SNAPSHOT"
 )
@@ -19,7 +19,7 @@ lazy val root = (project in file("."))
     publish := {},
     publishLocal := {},
     skip in publish := true
-  ) aggregate plugin
+  ) aggregate (annotations, plugin)
 
 lazy val plugin = (project in file("sbt-plugin"))
   .enablePlugins(SbtPlugin)
@@ -36,4 +36,14 @@ lazy val plugin = (project in file("sbt-plugin"))
       "org.scalameta" %% "contrib" % scalametaVersion ::
       "org.scalatest" %% "scalatest" % "3.0.5" % Test ::
       Nil,
+  ).dependsOn(annotations)
+
+lazy val annotations = (project in file("annotations"))
+  .settings(
+    name := "scala2protobuf-annotations",
+    commonSettings,
+
+    moduleName := "scala2protobuf-annotations",
+    libraryDependencies ++=
+        Nil,
   )

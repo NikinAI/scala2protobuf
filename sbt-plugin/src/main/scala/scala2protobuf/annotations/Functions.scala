@@ -1,4 +1,0 @@
-package scala2protobuf.annotations
-
-class FunctionData extends scala.annotation.StaticAnnotation
-class ServiceProcessor extends scala.annotation.StaticAnnotation
